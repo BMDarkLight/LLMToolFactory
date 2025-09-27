@@ -12,9 +12,9 @@ import re
 from tools.pdf_source import get_pdf_source_tool
 from tools.uri_source import get_uri_source_tool
 
-sessions_db = MongoClient(os.environ.get("MONGO_URI", "mongodb://localhost:27017/")).nexa.sessions
-agents_db = MongoClient(os.environ.get("MONGO_URI", "mongodb://localhost:27017/")).nexa.agents
-connectors_db = MongoClient(os.environ.get("MONGO_URI", "mongodb://localhost:27017/")).nexa.connectors
+sessions_db = MongoClient(os.environ.get("MONGO_URI", "mongodb://localhost:27017/")).llmtf.sessions
+agents_db = MongoClient(os.environ.get("MONGO_URI", "mongodb://localhost:27017/")).llmtf.agents
+connectors_db = MongoClient(os.environ.get("MONGO_URI", "mongodb://localhost:27017/")).llmtf.connectors
 
 Connectors = Literal[
     "source_pdf",
@@ -80,7 +80,7 @@ class Agent(BaseModel):
     org: PyObjectId
     model: Models
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    tools: list[Tools]
+    tools: List[Tool]
     connector_ids: List[PyObjectId] = Field(default_factory=list)
     created_at: str
     updated_at: str
@@ -90,7 +90,7 @@ class AgentCreate(BaseModel):
     description: str
     model: Models
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    tools: List[Tools] = []
+    tools: List[Tool] = []
     connector_ids: List[PyObjectId] = Field(default_factory=list)
 
 class AgentUpdate(BaseModel):
@@ -98,7 +98,7 @@ class AgentUpdate(BaseModel):
     description: Optional[str] = None
     model: Optional[Models] = None
     temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
-    tools: Optional[List[Tools]] = None
+    tools: Optional[List[Tool]] = None
     connector_ids: Optional[List[PyObjectId]] = None
 
 class ChatHistoryEntry(TypedDict):

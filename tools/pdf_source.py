@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from pymongo import MongoClient
 
 try:
-    knowledge_db = MongoClient(os.environ.get("MONGO_URI", "mongodb://localhost:27017/")).nexa.embeddings
+    knowledge_db = MongoClient(os.environ.get("MONGO_URI", "mongodb://localhost:27017/")).llmtf.embeddings
 except Exception as e:
     print(f"Error connecting to MongoDB: {e}")
     knowledge_db = None
