@@ -21,6 +21,16 @@ def list_agents():
         print(f"{agent['_id']}: {agent['name']} | {agent['description']}")
     print_line()
 
+def select_agent():
+    list_agents()
+    agent_id = input("Enter agent ID to select for this session (or press Enter to cancel): ").strip()
+    if agent_id:
+        try:
+            return PyObjectId(agent_id)
+        except Exception:
+            print("Invalid agent ID.")
+    return None
+
 def list_connectors():
     print_line()
     print("Connectors:")
@@ -175,7 +185,7 @@ def save_chat_history(session_id, chat_history):
 
 async def chat_session(session_id=None):
     print_line()
-    print("Welcome to the CLI Chatbot. Type 'exit' to quit, 'settings' for menu, 'history' to view session history.")
+    print("Welcome to the CLI Chatbot. Type 'exit' to quit, 'settings' for menu, 'history' to view session history, 'select' to choose an agent.")
     print_line()
 
     if session_id:
@@ -222,12 +232,8 @@ async def chat_session(session_id=None):
                 except Exception:
                     print("Invalid command format.")
             continue
-        elif user_input.lower() == "switch":
-            print("Switching agent.")
-            list_agents()
-            new_agent_id = input("Enter agent ID to switch to or press Enter to keep current: ").strip()
-            if new_agent_id:
-                agent_id = PyObjectId(new_agent_id)
+        elif user_input.lower() == "select":
+            agent_id = select_agent()
             continue
 
         agent_llm, messages, agent_name, agent_id_actual = await get_agent_components(
