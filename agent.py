@@ -6,6 +6,13 @@ from typing import TypedDict, Literal, List, Optional, Dict, Any
 from pymongo import MongoClient
 from bson import ObjectId
 from pydantic import BaseModel, Field, ConfigDict
+from typing import Optional, List, Tuple
+from bson import ObjectId
+from langchain_openai import ChatOpenAI
+from langgraph.prebuilt import create_react_agent
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.tools import Tool
+
 import os
 import re
 
@@ -115,46 +122,44 @@ class AgentState(TypedDict, total=False):
     answer: str
 
 @traceable
-async def get_agent_components(
+async def get_agent_graph(
     question: str,
     organization_id: ObjectId,
-    chat_history: Optional[List[ChatHistoryEntry]] = None,
+    chat_history: Optional[List[dict]] = None,
     agent_id: Optional[str] = None,
-) -> tuple:
+) -> Tuple:
+    """Return a LangGraph ReAct agent graph + metadata for execution."""
     question = question.strip()
     chat_history = chat_history or []
-    selected_agent = None
 
+    # --- Step 1: Select agent (either explicit ID or via router) ---
+    print(f"Selecting agent for question: {agent_id}")
     if agent_id:
         selected_agent = agents_db.find_one(
-            {"_id": ObjectId(agent_id), "org": organization_id}
+            {"_id": ObjectId(agent_id)}
         )
     else:
         agents = list(agents_db.find({"org": organization_id}))
+        selected_agent = None
         if agents:
             agent_descriptions = "\n".join(
                 [f"- {agent['name']}: {agent['description']}" for agent in agents]
             )
             router_prompt = [
                 SystemMessage(
-                    content=(
-                        "Route the user's question to the most appropriate agent. "
-                        f"Available Agents:\n{agent_descriptions}"
-                    )
+                    content="Route the user's question to the most appropriate agent.\n"
+                            f"Available Agents:\n{agent_descriptions}"
                 ),
                 HumanMessage(content=question),
             ]
             router_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-            selected_agent_name_response = await router_llm.ainvoke(router_prompt)
-            selected_agent_name = selected_agent_name_response.content.strip()
-            selected_agent = next(
-                (agent for agent in agents if agent["name"] == selected_agent_name),
-                None,
-            )
+            selected_agent_name = (await router_llm.ainvoke(router_prompt)).content.strip()
+            selected_agent = next((a for a in agents if a["name"] == selected_agent_name), None)
 
-    active_tools: List[Tool] = []
+    # --- Step 2: Collect tools ---
+    tools: List[Tool] = []
     if selected_agent:
-        active_tools.extend(selected_agent.get("tools", []))
+        tools.extend(selected_agent.get("tools", []))
         tool_factory_map = {
             "source_pdf": get_pdf_source_tool,
             "source_uri": get_uri_source_tool
@@ -163,35 +168,36 @@ async def get_agent_components(
         if connector_ids:
             agent_connectors = list(connectors_db.find({"_id": {"$in": connector_ids}}))
             for connector in agent_connectors:
-                connector_type = connector.get("connector_type")
-                tool_factory = tool_factory_map.get(connector_type)
-                if not tool_factory:
+                factory = tool_factory_map.get(connector.get("connector_type"))
+                if not factory:
                     continue
-                tool_name = _clean_tool_name(connector["name"], connector_type)
-                new_tool = tool_factory(settings=connector["settings"], name=tool_name)
-                active_tools.append(new_tool)
+                tool_name = f"{connector['connector_type']}_{connector['name']}".replace(" ", "_").lower()
+                tools.append(factory(settings=connector["settings"], name=tool_name))
 
-        agent_llm = ChatOpenAI(
+        for t in tools:
+            print(f"Using tool: {t.name} - {t.description}")
+
+        llm = ChatOpenAI(
             model=selected_agent["model"],
             temperature=selected_agent.get("temperature", 0.7),
-            tools=active_tools or None,
-            tool_choice="auto" if active_tools else None,
             streaming=True,
-            max_retries=3
+            max_retries=3,
         )
         system_prompt = selected_agent["description"]
-        final_agent_id = selected_agent["_id"]
-        final_agent_name = selected_agent["name"]
+        final_agent_id, final_agent_name = selected_agent["_id"], selected_agent["name"]
     else:
-        agent_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, max_retries=3)
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, max_retries=3)
         system_prompt = "You are a helpful general-purpose assistant."
-        final_agent_id = None
-        final_agent_name = "Generalist"
+        final_agent_id, final_agent_name = None, "Generalist"
 
-    messages: List = [SystemMessage(content=system_prompt)]
+    # --- Step 3: Create graph ---
+    graph = create_react_agent(llm, tools)
+
+    # --- Step 4: Build message history ---
+    messages = [SystemMessage(content=system_prompt)]
     for entry in chat_history:
         messages.append(HumanMessage(content=entry["user"]))
         messages.append(AIMessage(content=entry["assistant"]))
     messages.append(HumanMessage(content=question))
 
-    return agent_llm, messages, final_agent_name, str(final_agent_id) if final_agent_id else None
+    return graph, messages, final_agent_name, str(final_agent_id) if final_agent_id else None

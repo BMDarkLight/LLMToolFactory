@@ -2,7 +2,7 @@ import os
 from typing import Dict, Any, List
 import numpy as np
 from bson import ObjectId
-from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain.tools import StructuredTool
 from pydantic import BaseModel, Field
 from pymongo import MongoClient
@@ -40,7 +40,7 @@ class PDFToolWrapper(BaseModel):
         TOP_K = 3
         SIMILARITY_THRESHOLD = 0.75
 
-        if not knowledge_db:
+        if knowledge_db is None:
             return "Error: Database connection for the knowledge base is not available."
 
         document_id = self.settings.get("document_id")
