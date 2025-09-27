@@ -1,4 +1,4 @@
-from langchain_community.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langsmith import traceable
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
 from langchain.tools import Tool
@@ -58,13 +58,13 @@ class PyObjectId(ObjectId):
 class Connector(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
-    name: str = Field(...)
-    connector_type: Connectors = Field(..., alias="connector_type")
+    name: str
+    connector_type: Connectors
     settings: Dict[str, Any]
     org: PyObjectId
 
 class ConnectorCreate(BaseModel):
-    name: str = Field(...)
+    name: str
     connector_type: Connectors
     settings: Dict[str, Any]
 
@@ -80,7 +80,7 @@ class Agent(BaseModel):
     org: PyObjectId
     model: Models
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    tools: List[Tool]
+    tools: List[Tool] = []
     connector_ids: List[PyObjectId] = Field(default_factory=list)
     created_at: str
     updated_at: str
@@ -104,13 +104,13 @@ class AgentUpdate(BaseModel):
 class ChatHistoryEntry(TypedDict):
     user: str
     assistant: str
-    agent_id: str | None
+    agent_id: Optional[str]
     agent_name: str
 
 class AgentState(TypedDict, total=False):
     question: str
-    chat_history: list[ChatHistoryEntry]
-    agent_id: str | None
+    chat_history: Optional[List[ChatHistoryEntry]]
+    agent_id: Optional[str]
     agent_name: str
     answer: str
 
@@ -118,8 +118,8 @@ class AgentState(TypedDict, total=False):
 async def get_agent_components(
     question: str,
     organization_id: ObjectId,
-    chat_history: list | None = None,
-    agent_id: str | None = None,
+    chat_history: Optional[List[ChatHistoryEntry]] = None,
+    agent_id: Optional[str] = None,
 ) -> tuple:
     question = question.strip()
     chat_history = chat_history or []
@@ -133,16 +133,13 @@ async def get_agent_components(
         agents = list(agents_db.find({"org": organization_id}))
         if agents:
             agent_descriptions = "\n".join(
-                [f"- **{agent['name']}**: {agent['description']}" for agent in agents]
+                [f"- {agent['name']}: {agent['description']}" for agent in agents]
             )
             router_prompt = [
                 SystemMessage(
                     content=(
-                        "You are an expert at routing a user's request to the correct agent. "
-                        "Based on the user's question, select the best agent from the following list. "
-                        "You must output **only the name** of the agent you choose. "
-                        "If no agent seems suitable for the request, you must output 'Generalist'."
-                        f"\n\nAvailable Agents:\n{agent_descriptions}"
+                        "Route the user's question to the most appropriate agent. "
+                        f"Available Agents:\n{agent_descriptions}"
                     )
                 ),
                 HumanMessage(content=question),
@@ -155,71 +152,46 @@ async def get_agent_components(
                 None,
             )
 
+    active_tools: List[Tool] = []
     if selected_agent:
-        active_tools = [
-            tool for tool in [
-                search_web if "search_web" in selected_agent.get("tools", []) else None,
-            ] if tool is not None
-        ]
-
+        active_tools.extend(selected_agent.get("tools", []))
         tool_factory_map = {
-            "google_sheet": get_google_sheet_tool,
-            "google_drive": get_google_drive_tool,
             "source_pdf": get_pdf_source_tool,
             "source_uri": get_uri_source_tool
         }
-
         connector_ids = selected_agent.get("connector_ids", [])
         if connector_ids:
             agent_connectors = list(connectors_db.find({"_id": {"$in": connector_ids}}))
-            
             for connector in agent_connectors:
                 connector_type = connector.get("connector_type")
                 tool_factory = tool_factory_map.get(connector_type)
-                
                 if not tool_factory:
                     continue
-
                 tool_name = _clean_tool_name(connector["name"], connector_type)
-                
-                new_tool = tool_factory(
-                    settings=connector["settings"], 
-                    name=tool_name
-                )
+                new_tool = tool_factory(settings=connector["settings"], name=tool_name)
                 active_tools.append(new_tool)
-
 
         agent_llm = ChatOpenAI(
             model=selected_agent["model"],
             temperature=selected_agent.get("temperature", 0.7),
-            tools=active_tools,
+            tools=active_tools or None,
             tool_choice="auto" if active_tools else None,
             streaming=True,
             max_retries=3
         )
-        
         system_prompt = selected_agent["description"]
         final_agent_id = selected_agent["_id"]
         final_agent_name = selected_agent["name"]
     else:
-        agent_llm = ChatOpenAI(
-            model="gpt-4o-mini",
-            temperature=0.7,
-            max_retries=3
-        )
+        agent_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, max_retries=3)
         system_prompt = "You are a helpful general-purpose assistant."
         final_agent_id = None
         final_agent_name = "Generalist"
 
-    messages = [SystemMessage(content=system_prompt)]
+    messages: List = [SystemMessage(content=system_prompt)]
     for entry in chat_history:
         messages.append(HumanMessage(content=entry["user"]))
         messages.append(AIMessage(content=entry["assistant"]))
     messages.append(HumanMessage(content=question))
 
-    return (
-        agent_llm,
-        messages,
-        final_agent_name,
-        str(final_agent_id) if final_agent_id else None,
-    )
+    return agent_llm, messages, final_agent_name, str(final_agent_id) if final_agent_id else None
