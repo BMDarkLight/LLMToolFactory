@@ -21,15 +21,35 @@ def list_agents():
         print(f"{agent['_id']}: {agent['name']} | {agent['description']}")
     print_line()
 
+def search_agent_by_name(query: str) -> PyObjectId:
+    results = list(agents_db.find({"name": {"$regex": query, "$options": "i"}}))
+    if not results:
+        print("No agents found matching that name.")
+        return None
+    print("Matching agents:")
+    for i, agent in enumerate(results):
+        print(f"{i}: {agent['_id']} | {agent['name']} | {agent['description']}")
+    choice = input("Select agent by number: ").strip()
+    try:
+        idx = int(choice)
+        return results[idx]["_id"]
+    except Exception:
+        print("Invalid selection.")
+        return None
+
 def select_agent(current_selection=None):
     list_agents()
-    agent_id = input("Enter agent ID to select for this session (or press Enter to cancel): ").strip()
-    if agent_id:
-        try:
-            current_selection = PyObjectId(agent_id)
-            print(f"Selected agent {agent_id} for this session.")
-        except Exception:
-            print("Invalid agent ID.")
+    agent_input = input("Enter agent ID to select or type name to search (or press Enter to cancel): ").strip()
+    if not agent_input:
+        return current_selection
+    if PyObjectId.is_valid(agent_input):
+        current_selection = PyObjectId(agent_input)
+        print(f"Selected agent {agent_input} for this session.")
+    else:
+        search_result = search_agent_by_name(agent_input)
+        if search_result:
+            current_selection = PyObjectId(search_result)
+            print(f"Selected agent {current_selection} for this session.")
     return current_selection
 
 def list_connectors():
@@ -59,8 +79,12 @@ def create_agent():
     print(f"Created agent with ID: {result.inserted_id}")
 
 def edit_agent():
-    list_agents()
-    agent_id = input("Enter agent ID to edit: ")
+    agent_id = input("Enter agent ID to edit (or leave empty to search by name): ").strip()
+    if not agent_id:
+        query = input("Enter agent name to search: ").strip()
+        agent_id = search_agent_by_name(query)
+        if not agent_id:
+            return
     agent = agents_db.find_one({"_id": PyObjectId(agent_id)})
     if not agent:
         print("Agent not found.")
@@ -72,8 +96,12 @@ def edit_agent():
     print("Agent updated.")
 
 def delete_agent():
-    list_agents()
-    agent_id = input("Enter agent ID to delete: ")
+    agent_id = input("Enter agent ID to delete (or leave empty to search by name): ").strip()
+    if not agent_id:
+        query = input("Enter agent name to search: ").strip()
+        agent_id = search_agent_by_name(query)
+        if not agent_id:
+            return
     agents_db.delete_one({"_id": PyObjectId(agent_id)})
     print("Agent deleted.")
 
@@ -106,7 +134,13 @@ def delete_connector():
 
 def attach_connector_to_agent():
     list_agents()
-    agent_id = input("Agent ID: ")
+    agent_id = input("Agent ID: ").strip()
+    if not agent_id:
+        query = input("Enter agent name to search: ").strip()
+        agent_id = search_agent_by_name(query)
+        if not agent_id:
+            print("No agent selected.")
+            return
     list_connectors()
     conn_id = input("Connector ID to attach: ")
     agents_db.update_one(
@@ -117,7 +151,13 @@ def attach_connector_to_agent():
 
 def detach_connector_from_agent():
     list_agents()
-    agent_id = input("Agent ID: ")
+    agent_id = input("Agent ID: ").strip()
+    if not agent_id:
+        query = input("Enter agent name to search: ").strip()
+        agent_id = search_agent_by_name(query)
+        if not agent_id:
+            print("No agent selected.")
+            return
     agent = agents_db.find_one({"_id": PyObjectId(agent_id)})
     if not agent or not agent.get("connector_ids"):
         print("Agent has no connectors.")
