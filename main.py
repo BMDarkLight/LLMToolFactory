@@ -21,15 +21,16 @@ def list_agents():
         print(f"{agent['_id']}: {agent['name']} | {agent['description']}")
     print_line()
 
-def select_agent():
+def select_agent(current_selection=None):
     list_agents()
     agent_id = input("Enter agent ID to select for this session (or press Enter to cancel): ").strip()
     if agent_id:
         try:
-            return PyObjectId(agent_id)
+            current_selection = PyObjectId(agent_id)
+            print(f"Selected agent {agent_id} for this session.")
         except Exception:
             print("Invalid agent ID.")
-    return None
+    return current_selection
 
 def list_connectors():
     print_line()
@@ -185,7 +186,7 @@ def save_chat_history(session_id, chat_history):
 
 async def chat_session(session_id=None):
     print_line()
-    print("Welcome to the CLI Chatbot. Type 'exit' to quit, 'settings' for menu, 'history' to view session history, 'select' to choose an agent.")
+    print("Welcome to the CLI Chatbot. Type 'exit' to quit, 'settings' for menu, 'history' to view session history, 'select' to choose an agent, 'revoke' to deselect agent.")
     print_line()
 
     if session_id:
@@ -201,7 +202,7 @@ async def chat_session(session_id=None):
     agent_id = None
 
     while True:
-        user_input = input("You: ")
+        user_input = input("You: ").strip()
         if user_input.lower() == "exit":
             break
         elif user_input.lower() == "settings":
@@ -233,7 +234,11 @@ async def chat_session(session_id=None):
                     print("Invalid command format.")
             continue
         elif user_input.lower() == "select":
-            agent_id = select_agent()
+            agent_id = select_agent(agent_id)
+            continue
+        elif user_input.lower() == "revoke":
+            agent_id = None
+            print("Agent selection revoked. Using Generalist.")
             continue
 
         agent_llm, messages, agent_name, agent_id_actual = await get_agent_components(
