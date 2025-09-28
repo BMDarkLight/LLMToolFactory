@@ -129,6 +129,13 @@ async def get_agent_graph(
     agent_id: Optional[str] = None,
 ) -> Tuple:
     """Return a LangGraph ReAct agent graph + metadata for execution."""
+    if isinstance(question, dict):
+        action = question.get("action")
+        if action == "list_agents":
+            return None, [{"agents": list(agents_db.find({}))}], None, None
+        elif action == "list_connectors":
+            return None, [{"connectors": list(connectors_db.find({}))}], None, None
+
     question = question.strip()
     chat_history = chat_history or []
 
